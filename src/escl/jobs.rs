@@ -346,8 +346,13 @@ impl ScannerService {
         let spawned = std::thread::Builder::new()
             .name("scan-page".into())
             .spawn(move || {
+                // Hold the body open until the job is recorded: a client
+                // that POSTs its next job the moment the image ends must
+                // find this one finished, not get 503.
+                let hold = body_tx.clone();
                 let outcome = svc.run_page(session, &ticket, &worker_active, start_tx, body_tx);
                 svc.settle(id, outcome, &worker_active);
+                drop(hold);
             });
         if let Err(e) = spawned {
             let mut t = self.table();

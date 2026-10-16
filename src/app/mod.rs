@@ -59,6 +59,9 @@ struct Shared {
     last_probe: Mutex<Option<std::time::Instant>>,
     kick: Notify,
     debounce: Duration,
+    /// Set by shutdown; held across a reconcile pass so shutdown can wait for
+    /// one in flight (a blocking pass cannot be aborted) before withdrawing.
+    stopped: Mutex<bool>,
 }
 
 pub struct App {
@@ -105,6 +108,7 @@ impl App {
             last_probe: Mutex::new(None),
             kick: Notify::new(),
             debounce,
+            stopped: Mutex::new(false),
         });
         shared
             .health
@@ -156,6 +160,13 @@ impl App {
     pub async fn shutdown(self) {
         for t in &self.tasks {
             t.abort();
+        }
+        // Waits for a reconcile pass that is still running on a blocking
+        // thread, so it cannot re-announce after the withdrawals below.
+        let shared = Arc::clone(&self.shared);
+        let stop = tokio::task::spawn_blocking(move || *shared.stopped.lock() = true).await;
+        if let Err(e) = stop {
+            tracing::error!(error = %e, "shutdown: could not stop the reconcile loop");
         }
         for listener in self.shared.listeners.shutdown() {
             // An aborted task reports JoinError::Cancelled; that is the expected end.
@@ -223,6 +234,13 @@ impl Shared {
         while let Some(event) = rx.recv().await {
             if let MdnsEvent::NameChanged { original, new } = &event {
                 self.announcer.on_name_change(original, new);
+                continue;
+            }
+            // Our own announcements come back through the browser; they say
+            // nothing new about the LAN.
+            if let MdnsEvent::Resolved(r) = &event
+                && r.host.eq_ignore_ascii_case(&self.deps.mdns.host_name())
+            {
                 continue;
             }
             let changed = self.registry.lock().apply(&event);

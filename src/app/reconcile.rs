@@ -38,6 +38,10 @@ impl Shared {
 
     /// Returns true when something should be retried soon.
     pub(super) fn reconcile(&self) -> bool {
+        let stopped = self.stopped.lock();
+        if *stopped {
+            return false;
+        }
         let dcfg = DiscoveryConfig {
             own_host: self.deps.mdns.host_name(),
             no_scan: self.cfg.no_scan.clone(),
