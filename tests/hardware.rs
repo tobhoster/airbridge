@@ -168,7 +168,7 @@ fn hardware_adf_scan_if_paper_is_loaded() {
     let base = bridge_url();
     // 8 x 11 inch: the DCP-L2540DW's feeder is 2503/300 in wide, so a full
     // 8.5 in Letter width is (correctly) refused with 409.
-    let (status, body, _) = scan_once(&base, &ticket("Feeder", "RGB24", 150, 2400, 3300));
+    let (status, body, job) = scan_once(&base, &ticket("Feeder", "RGB24", 150, 2400, 3300));
     match status {
         200 => {
             let (w, _, c) = jpeg_shape(&body);
@@ -176,7 +176,22 @@ fn hardware_adf_scan_if_paper_is_loaded() {
                 w <= 1200 && w * 100 >= 1200 * 95 && c == 3,
                 "feeder page {w} px wide, {c} channels"
             );
-            eprintln!("feeder page: {} bytes", body.len());
+            eprintln!("feeder page 1: {} bytes", body.len());
+            // A feeder job stays open for more pages; read until the
+            // feeder runs dry (404), like Image Capture does, so the next
+            // job is not refused as busy.
+            for page in 2..=50 {
+                match agent().get(&format!("{job}/NextDocument")).call() {
+                    Ok(r) => {
+                        let mut buf = Vec::new();
+                        std::io::Read::read_to_end(&mut r.into_reader(), &mut buf).unwrap();
+                        eprintln!("feeder page {page}: {} bytes", buf.len());
+                    }
+                    Err(ureq::Error::Status(404, _)) => return,
+                    Err(e) => panic!("feeder page {page}: {e}"),
+                }
+            }
+            panic!("feeder never ran dry");
         }
         409 => eprintln!(
             "feeder empty (409 ScannerAdfEmpty): nothing to scan, which is the correct answer"
