@@ -285,7 +285,11 @@ mod tests {
             index: 5,
         };
         assert_eq!(
-            select(std::slice::from_ref(&only), &["ppp0".into()], &Selection::Auto),
+            select(
+                std::slice::from_ref(&only),
+                &["ppp0".into()],
+                &Selection::Auto
+            ),
             vec![only]
         );
     }
