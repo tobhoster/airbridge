@@ -82,6 +82,8 @@ jobs:
         run: |
           docker run -d --name ab -p 18090:8090 -e AIRBRIDGE_BACKEND=fake -e AIRBRIDGE_ALLOW=0.0.0.0/0 airbridge:ci
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:18090/healthz && break; sleep 1; done
-          curl -sf http://127.0.0.1:18090/eSCL/ScannerCapabilities | grep -q '<pwg:MakeAndModel>Airbridge Demo Scanner</pwg:MakeAndModel>'
+          # Healthy comes first; the scanner is served once the probe ran.
+          for i in $(seq 1 30); do curl -sf -o caps.xml http://127.0.0.1:18090/eSCL/ScannerCapabilities && break; sleep 1; done
+          grep -q '<pwg:MakeAndModel>Airbridge Demo Scanner</pwg:MakeAndModel>' caps.xml
           docker exec ab airbridge healthcheck
           docker logs ab
