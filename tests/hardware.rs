@@ -32,7 +32,11 @@ fn browse(ty: &str, secs: u64) -> BTreeMap<String, Seen> {
     while let Some(left) = end.checked_duration_since(Instant::now()) {
         match rx.recv_timeout(left) {
             Ok(ServiceEvent::ServiceResolved(r)) => {
-                let txt = r.txt_properties.iter().map(|p| (p.key().to_ascii_lowercase(), p.val_str().to_owned())).collect();
+                let txt = r
+                    .txt_properties
+                    .iter()
+                    .map(|p| (p.key().to_ascii_lowercase(), p.val_str().to_owned()))
+                    .collect();
                 let addrs = r.addresses.iter().map(|a| a.to_ip_addr()).collect();
                 out.insert(r.fullname.clone(), (r.host.clone(), addrs, r.port, txt));
             }
@@ -55,12 +59,20 @@ fn bridge_url() -> String {
         .iter()
         .find(|(n, (h, ..))| n.starts_with(&name) && h.starts_with("airbridge-"))
         .unwrap_or_else(|| panic!("no airbridge scanner named {name:?} on the LAN: {found:#?}"));
-    let ip = addrs.iter().find(|a| a.is_ipv4()).unwrap_or_else(|| panic!("{host} has no IPv4 address"));
-    format!("http://{ip}:{port}/{}", txt.get("rs").map_or("eSCL", String::as_str))
+    let ip = addrs
+        .iter()
+        .find(|a| a.is_ipv4())
+        .unwrap_or_else(|| panic!("{host} has no IPv4 address"));
+    format!(
+        "http://{ip}:{port}/{}",
+        txt.get("rs").map_or("eSCL", String::as_str)
+    )
 }
 
 fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new().timeout(Duration::from_secs(180)).build()
+    ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(180))
+        .build()
 }
 
 fn ticket(source: &str, color: &str, res: u32, w: u32, h: u32) -> String {
@@ -72,10 +84,20 @@ fn ticket(source: &str, color: &str, res: u32, w: u32, h: u32) -> String {
 /// POST a job, fetch one page. Returns (status of NextDocument, body, job URL).
 fn scan_once(base: &str, body: &str) -> (u16, Vec<u8>, String) {
     let a = agent();
-    let resp = a.post(&format!("{base}/ScanJobs")).set("Content-Type", "text/xml").send_string(body).unwrap();
+    let resp = a
+        .post(&format!("{base}/ScanJobs"))
+        .set("Content-Type", "text/xml")
+        .send_string(body)
+        .unwrap();
     assert_eq!(resp.status(), 201);
     let location = resp.header("Location").unwrap().to_owned();
-    let origin = base.split("/eSCL").next().unwrap().split("/scanners/").next().unwrap();
+    let origin = base
+        .split("/eSCL")
+        .next()
+        .unwrap()
+        .split("/scanners/")
+        .next()
+        .unwrap();
     let job = format!("{origin}{location}");
     match a.get(&format!("{job}/NextDocument")).call() {
         Ok(r) => {
@@ -110,9 +132,23 @@ fn hardware_flatbed_color_and_gray_at_150_300_600() {
             let t0 = Instant::now();
             let (status, body, job) = scan_once(&base, &ticket("Platen", color, res, 600, 600));
             assert_eq!(status, 200, "{color} {res} dpi");
-            let px = (res * 2) as usize;
-            assert_eq!(jpeg_shape(&body), (px, px, channels), "{color} {res} dpi");
-            eprintln!("{color} {res} dpi: {} bytes in {:?}", body.len(), t0.elapsed());
+            // brscan4 rounds the area itself: `scanimage -x 50.8 -y 50.8
+            // --resolution 300` returns 576x575, not 600x600. Accept the
+            // driver's rounding (within 5%), never a wrong shape.
+            let want = (res * 2) as usize;
+            let (w, h, c) = jpeg_shape(&body);
+            assert_eq!(c, channels, "{color} {res} dpi");
+            for got in [w, h] {
+                assert!(
+                    got <= want && got * 100 >= want * 95,
+                    "{color} {res} dpi: {w}x{h}, want ~{want}"
+                );
+            }
+            eprintln!(
+                "{color} {res} dpi: {} bytes in {:?}",
+                body.len(),
+                t0.elapsed()
+            );
             let (next, ..) = {
                 let r = agent().get(&format!("{job}/NextDocument")).call();
                 match r {
@@ -134,10 +170,15 @@ fn hardware_adf_scan_if_paper_is_loaded() {
     match status {
         200 => {
             let (w, _, c) = jpeg_shape(&body);
-            assert_eq!((w, c), (1275, 3));
+            assert!(
+                w <= 1275 && w * 100 >= 1275 * 95 && c == 3,
+                "feeder page {w} px wide, {c} channels"
+            );
             eprintln!("feeder page: {} bytes", body.len());
         }
-        409 => eprintln!("feeder empty (409 ScannerAdfEmpty): nothing to scan, which is the correct answer"),
+        409 => eprintln!(
+            "feeder empty (409 ScannerAdfEmpty): nothing to scan, which is the correct answer"
+        ),
         other => panic!("feeder scan returned {other}"),
     }
 }
@@ -149,22 +190,40 @@ fn hardware_mdns_shows_exactly_one_scanner() {
     let found = browse("_uscan._tcp", 8);
     let matching: Vec<_> = found
         .iter()
-        .filter(|(n, (.., txt))| n.starts_with(&name) || txt.get("ty").is_some_and(|t| t.contains("E514dw") || *t == name))
+        .filter(|(n, (.., txt))| {
+            n.starts_with(&name)
+                || txt
+                    .get("ty")
+                    .is_some_and(|t| t.contains("E514dw") || *t == name)
+        })
         .collect();
-    assert_eq!(matching.len(), 1, "expected one AirScan service for {name:?}: {matching:#?}");
+    assert_eq!(
+        matching.len(),
+        1,
+        "expected one AirScan service for {name:?}: {matching:#?}"
+    );
 }
 
 #[test]
 #[ignore = "hardware: needs the LAN"]
 fn hardware_dell_is_not_reshared_as_a_printer() {
-    let printer_host = std::env::var("AIRBRIDGE_PRINTER_HOST").unwrap_or_else(|_| "DELL6D6F61.local.".into());
+    let printer_host =
+        std::env::var("AIRBRIDGE_PRINTER_HOST").unwrap_or_else(|_| "DELL6D6F61.local.".into());
     let found = browse("_ipp._tcp", 8);
     let dell: Vec<_> = found
         .iter()
-        .filter(|(n, (.., txt))| n.contains("E514dw") || txt.get("ty").is_some_and(|t| t.contains("E514dw")))
+        .filter(|(n, (.., txt))| {
+            n.contains("E514dw") || txt.get("ty").is_some_and(|t| t.contains("E514dw"))
+        })
         .collect();
-    assert!(!dell.is_empty(), "the printer's own AirPrint service should be visible");
+    assert!(
+        !dell.is_empty(),
+        "the printer's own AirPrint service should be visible"
+    );
     for (name, (host, ..)) in &dell {
-        assert!(host.eq_ignore_ascii_case(&printer_host), "{name} is announced by {host}, not by the printer itself");
+        assert!(
+            host.eq_ignore_ascii_case(&printer_host),
+            "{name} is announced by {host}, not by the printer itself"
+        );
     }
 }
