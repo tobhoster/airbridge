@@ -1,0 +1,16 @@
+# docker compose up -d
+#
+# Builds the image locally (brscan4 is downloaded from Brother during the
+# build; no prebuilt image is published) and runs it on the host network,
+# which mDNS needs. Linux hosts only: Docker Desktop on macOS/Windows has no
+# real host networking.
+services:
+  airbridge:
+    build: .
+    image: airbridge:local
+    network_mode: host
+    restart: unless-stopped
+    # Optional settings, see README "Configuration":
+    # environment:
+    #   AIRBRIDGE_NO_PRINT: "MYPRINTER"
+    #   AIRBRIDGE_LOCATION: "Office"

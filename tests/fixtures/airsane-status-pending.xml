@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<scan:ScannerStatus xmlns:pwg='http://www.pwg.org/schemas/2010/12/sm' xmlns:scan='http://schemas.hp.com/imaging/escl/2011/05/03'>
+<pwg:Version>2.0</pwg:Version>
+<pwg:State>Idle</pwg:State>
+<scan:Jobs>
+<scan:JobInfo>
+<pwg:JobUri>/eSCL/ScanJobs/2d3f7112-6c2c-5857-be1f-1fd3fe9a6f2c</pwg:JobUri>
+<pwg:JobUuid>2d3f7112-6c2c-5857-be1f-1fd3fe9a6f2c</pwg:JobUuid>
+<scan:Age>0</scan:Age>
+<pwg:JobState>Pending</pwg:JobState>
+<pwg:ImagesCompleted>0</pwg:ImagesCompleted>
+<pwg:JobStateReasons>
+<pwg:JobStateReason>JobQueued</pwg:JobStateReason>
+</pwg:JobStateReasons>
+</scan:JobInfo>
+</scan:Jobs>
+</scan:ScannerStatus>

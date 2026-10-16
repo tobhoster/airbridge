@@ -1,0 +1,4 @@
+# Hermetic tests: binaries run in an empty network namespace.
+# Set AIRBRIDGE_ALLOW_NETWORK=1 for the hardware suite or `cargo run`.
+[target.'cfg(target_os = "linux")']
+runner = "scripts/netns-runner.sh"

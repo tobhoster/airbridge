@@ -1,0 +1,21 @@
+[package]
+name = "airbridge-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+airbridge = { path = ".." }
+
+[[bin]]
+name = "scan_settings"
+path = "fuzz_targets/scan_settings.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<scan:ScannerStatus xmlns:pwg='http://www.pwg.org/schemas/2010/12/sm' xmlns:scan='http://schemas.hp.com/imaging/escl/2011/05/03'>
+<pwg:Version>2.0</pwg:Version>
+<pwg:State>Idle</pwg:State>
+<scan:Jobs>
+</scan:Jobs>
+</scan:ScannerStatus>

@@ -1,0 +1,85 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Toolchain deps
+        run: |
+          sudo apt-get update && sudo apt-get install -y nasm
+          # Tests run in an empty network namespace (scripts/netns-runner.sh);
+          # Ubuntu 24.04 blocks unprivileged user namespaces by default.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked --no-run
+      - name: Test suite (hermetic, must finish within 15 s)
+        run: |
+          start=$(date +%s%N)
+          cargo test --locked
+          elapsed_ms=$(( ($(date +%s%N) - start) / 1000000 ))
+          echo "test suite: ${elapsed_ms} ms"
+          test "$elapsed_ms" -lt 15000 || { echo "test suite took ${elapsed_ms} ms (limit 15000)"; exit 1; }
+
+  fuzz:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: sudo apt-get update && sudo apt-get install -y nasm && cargo install cargo-fuzz --locked
+      - name: Fuzz ScanSettings for 60 s
+        env:
+          AIRBRIDGE_ALLOW_NETWORK: "1"
+        working-directory: fuzz
+        run: |
+          mkdir -p corpus/scan_settings
+          cargo fuzz run scan_settings corpus/scan_settings seeds/scan_settings -- -max_total_time=60 -rss_limit_mb=512
+
+  bench:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - run: |
+          sudo apt-get update && sudo apt-get install -y nasm
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Criterion, fail on >20% regression against the base commit
+        run: scripts/bench-gate.sh "${{ github.event.pull_request.base.sha || github.event.before }}" 20
+      - name: Startup, idle RSS and idle CPU
+        run: |
+          cargo build --release --locked
+          AIRBRIDGE_ALLOW_NETWORK=1 scripts/perf-smoke.sh
+
+  container:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (verifies the brscan4 SHA-256)
+        run: docker build -t airbridge:ci .
+      - name: Image size budget
+        run: |
+          size=$(docker image inspect airbridge:ci --format '{{.Size}}')
+          budget=$(cat container-size-budget)
+          echo "image ${size} bytes, budget ${budget}"
+          test "$size" -le "$budget"
+      - name: Smoke test with the fake backend
+        run: |
+          docker run -d --name ab -p 18090:8090 -e AIRBRIDGE_BACKEND=fake -e AIRBRIDGE_ALLOW=0.0.0.0/0 airbridge:ci
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:18090/healthz && break; sleep 1; done
+          curl -sf http://127.0.0.1:18090/eSCL/ScannerCapabilities | grep -q '<pwg:MakeAndModel>Airbridge Demo Scanner</pwg:MakeAndModel>'
+          docker exec ab airbridge healthcheck
+          docker logs ab
