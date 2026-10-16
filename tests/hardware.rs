@@ -166,12 +166,14 @@ fn hardware_flatbed_color_and_gray_at_150_300_600() {
 #[ignore = "hardware: needs the LAN, a running airbridge and the scanner"]
 fn hardware_adf_scan_if_paper_is_loaded() {
     let base = bridge_url();
-    let (status, body, _) = scan_once(&base, &ticket("Feeder", "RGB24", 150, 2550, 3300));
+    // 8 x 11 inch: the DCP-L2540DW's feeder is 2503/300 in wide, so a full
+    // 8.5 in Letter width is (correctly) refused with 409.
+    let (status, body, _) = scan_once(&base, &ticket("Feeder", "RGB24", 150, 2400, 3300));
     match status {
         200 => {
             let (w, _, c) = jpeg_shape(&body);
             assert!(
-                w <= 1275 && w * 100 >= 1275 * 95 && c == 3,
+                w <= 1200 && w * 100 >= 1200 * 95 && c == 3,
                 "feeder page {w} px wide, {c} channels"
             );
             eprintln!("feeder page: {} bytes", body.len());
