@@ -80,11 +80,26 @@ pub fn select(all: &[IfAddr], default_ifaces: &[String], sel: &Selection) -> Vec
             }
         }
     };
-    let mut out: Vec<IfAddr> = all
+    let candidates: Vec<IfAddr> = all
         .iter()
         // Loopback is excluded by interface name (`lo` is in VIRTUAL_PREFIXES),
         // not by address, so tests can model a LAN with 127.0.2.0/24 aliases.
         .filter(|a| wanted.contains(a.iface.as_str()) && !is_link_local(a.ip))
+        .cloned()
+        .collect();
+    // A host-prefix address next to a real subnet address on the same
+    // interface is a floating VIP (keepalived, Talos/kube-vip): it moves to
+    // another machine at any time, so never announce or serve on it.
+    let floating = |a: &IfAddr| {
+        let host_prefix = if a.ip.is_ipv4() { 32 } else { 128 };
+        a.prefix == host_prefix
+            && candidates.iter().any(|b| {
+                b.iface == a.iface && b.ip.is_ipv4() == a.ip.is_ipv4() && b.prefix < host_prefix
+            })
+    };
+    let mut out: Vec<IfAddr> = candidates
+        .iter()
+        .filter(|a| !floating(a))
         .cloned()
         .collect();
     out.sort();
@@ -239,6 +254,40 @@ mod tests {
                     wlo1\t0044A8C0\t00000000\t0001\t0\t0\t600\t00FCFFFF\t0\t0\t0\n\
                     docker0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0\n";
         assert_eq!(parse_proc_route(text), vec!["wlo1".to_owned()]);
+    }
+
+    #[test]
+    fn floating_vip_is_never_served() {
+        // node-3 of the homelab: the Kubernetes API VIP sits on the LAN NIC as a /32.
+        let node = IfAddr {
+            iface: "enp0s31f6".into(),
+            ip: "192.168.68.64".parse().unwrap(),
+            prefix: 22,
+            index: 2,
+        };
+        let vip = IfAddr {
+            iface: "enp0s31f6".into(),
+            ip: "192.168.68.100".parse().unwrap(),
+            prefix: 32,
+            index: 2,
+        };
+        let got = select(
+            &[node.clone(), vip],
+            &["enp0s31f6".into()],
+            &Selection::Auto,
+        );
+        assert_eq!(got, vec![node]);
+        // A /32 that is the interface's only address (point-to-point setups) stays.
+        let only = IfAddr {
+            iface: "ppp0".into(),
+            ip: "10.1.2.3".parse().unwrap(),
+            prefix: 32,
+            index: 5,
+        };
+        assert_eq!(
+            select(std::slice::from_ref(&only), &["ppp0".into()], &Selection::Auto),
+            vec![only]
+        );
     }
 
     #[test]
