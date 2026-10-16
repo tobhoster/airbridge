@@ -9,6 +9,13 @@ base="${1:?usage: bench-gate.sh <base-ref> [percent]}"
 limit="${2:-20}"
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
+if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+    # First push of a branch (base 000…) or a rewritten history: nothing to
+    # compare against, so record the numbers and pass.
+    echo "base $base is not a commit here; recording only"
+    cargo bench --bench perf -- --noplot
+    exit 0
+fi
 tree="$(mktemp -d)"
 trap 'git worktree remove --force "$tree" >/dev/null 2>&1 || true' EXIT
 git worktree add --detach "$tree" "$base" >/dev/null
