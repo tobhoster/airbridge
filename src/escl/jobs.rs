@@ -215,7 +215,9 @@ impl ScannerService {
         self.table().jobs.iter().all(|j| j.state.is_terminal())
     }
 
-    pub fn create_job(&self, body: &[u8]) -> Result<Uuid, CreateError> {
+    /// `client` (peer address and user agent) only goes to the log, so an
+    /// unexpected scan can be traced to the machine that asked for it.
+    pub fn create_job(&self, body: &[u8], client: &str) -> Result<Uuid, CreateError> {
         let raw = ticket::parse(body)?;
         let ticket = ticket::validate(&raw, &self.profile)?;
         self.purge();
@@ -227,6 +229,7 @@ impl ScannerService {
         let p = &ticket.page;
         tracing::info!(
             job = %id,
+            client,
             source = ?p.source,
             color = p.color.escl(),
             dpi = p.resolution,

@@ -139,6 +139,19 @@ async fn dispatch(State(st): State<Arc<HttpState>>, req: Request) -> Response {
         )
             .into_response(),
         (&Method::POST, ["ScanJobs"]) => {
+            let peer = req
+                .extensions()
+                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .map_or_else(|| "unknown".to_owned(), |c| c.0.ip().to_string());
+            let agent = req
+                .headers()
+                .get(header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("-")
+                .chars()
+                .take(120)
+                .collect::<String>();
+            let client = format!("{peer} ({agent})");
             let body = match tokio::time::timeout(
                 st.body_timeout,
                 axum::body::to_bytes(req.into_body(), MAX_TICKET_BYTES),
@@ -151,7 +164,7 @@ async fn dispatch(State(st): State<Arc<HttpState>>, req: Request) -> Response {
                 }
                 Err(_) => return text(StatusCode::REQUEST_TIMEOUT, "request body too slow\n"),
             };
-            match scanner.create_job(&body) {
+            match scanner.create_job(&body, &client) {
                 Ok(id) => {
                     let location = format!("{}/ScanJobs/{id}", scanner.root);
                     let mut resp = StatusCode::CREATED.into_response();
