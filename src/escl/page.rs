@@ -183,6 +183,7 @@ impl ScannerService {
             match outcome {
                 Outcome::PageDone(session) => {
                     job.images += 1;
+                    tracing::info!(job = %id, page = job.images, "page delivered");
                     if job.state.is_terminal() {
                         // Cancelled while the last bytes went out: `session` drops (closes) here.
                     } else if feeder {

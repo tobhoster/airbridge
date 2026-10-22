@@ -56,6 +56,9 @@ struct Shared {
     registry: Mutex<Registry>,
     registered: Mutex<BTreeMap<String, Registration>>,
     sane_dirty: Mutex<bool>,
+    /// A backend's configuration changed (brsaneconfig4): the next probe
+    /// must sane_exit/sane_init. Never set by timers or retries.
+    sane_reinit: Mutex<bool>,
     last_probe: Mutex<Option<std::time::Instant>>,
     kick: Notify,
     debounce: Duration,
@@ -105,6 +108,7 @@ impl App {
             registry: Mutex::new(Registry::default()),
             registered: Mutex::new(BTreeMap::new()),
             sane_dirty: Mutex::new(true),
+            sane_reinit: Mutex::new(false),
             last_probe: Mutex::new(None),
             kick: Notify::new(),
             debounce,

@@ -159,6 +159,8 @@ struct Shared {
     devices: Vec<FakeDevice>,
     behavior: Mutex<Behavior>,
     handles: AtomicUsize,
+    /// sane_exit/sane_init cycles (each one leaks resources in real SANE).
+    reloads: AtomicUsize,
     /// Releases wedged reads so tests do not leak threads.
     released: Mutex<bool>,
     wake: Condvar,
@@ -177,6 +179,7 @@ impl FakeBackend {
                 devices,
                 behavior: Mutex::new(Behavior::default()),
                 handles: AtomicUsize::new(0),
+                reloads: AtomicUsize::new(0),
                 released: Mutex::new(false),
                 wake: Condvar::new(),
             }),
@@ -204,6 +207,10 @@ impl FakeBackend {
         *self.devices_override.lock() = Some(devices);
     }
 
+    pub fn reload_count(&self) -> usize {
+        self.shared.reloads.load(Ordering::SeqCst)
+    }
+
     pub fn release_wedged(&self) {
         *self.shared.released.lock() = true;
         self.shared.wake.notify_all();
@@ -226,6 +233,7 @@ impl Backend for FakeBackend {
         if self.open_handles() != 0 {
             return Err(BackendError::Busy);
         }
+        self.shared.reloads.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 

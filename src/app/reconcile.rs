@@ -81,6 +81,8 @@ impl Shared {
                 Ok(()) => {
                     registered.insert(t.name.clone(), want);
                     *self.sane_dirty.lock() = true;
+                    // brother4 reads its device list only in sane_init.
+                    *self.sane_reinit.lock() = true;
                 }
                 Err(e) => {
                     tracing::warn!(name = %t.name, error = %e, "brscan4 registration failed");
@@ -122,8 +124,15 @@ impl Shared {
 
     fn probe(&self, plan: &Plan) -> Result<bool, crate::backend::BackendError> {
         let backend = &self.deps.backend;
-        if let Err(e) = backend.reload() {
+        // sane_exit/sane_init leaks a libusb context in several stock
+        // backends (~37 eventfd/timerfd per cycle with Debian's dll.conf),
+        // so re-initialise only when a backend's configuration changed;
+        // plain re-probes (timer, retries) just list devices.
+        if std::mem::take(&mut *self.sane_reinit.lock())
+            && let Err(e) = backend.reload()
+        {
             tracing::warn!(error = %e, "SANE reload skipped");
+            *self.sane_reinit.lock() = true;
         }
         let devices = backend.devices()?;
         let brother: Vec<BrotherTarget> = self

@@ -224,6 +224,16 @@ impl ScannerService {
             return Err(CreateError::Busy);
         }
         let id = Uuid::new_v4();
+        let p = &ticket.page;
+        tracing::info!(
+            job = %id,
+            source = ?p.source,
+            color = p.color.escl(),
+            dpi = p.resolution,
+            region = ?p.region,
+            format = ticket.format.mime(),
+            "scan job created"
+        );
         let now = Instant::now();
         t.jobs.push(Job {
             id,
