@@ -41,6 +41,67 @@ async fn one_bit_backend_data_still_yields_8bit_gray() {
     );
 }
 
+/// Image Capture's overview asks for the whole advertised flatbed (Mac log:
+/// region 0,0 2502x4200 at 100 dpi) and maps the reply onto that area to
+/// draw its selection boxes. brscan4 silently delivers less (291 of 355.6 mm,
+/// width rounded), which put every box in the wrong place. The page must come
+/// out exactly the requested size, padded with white, content anchored at
+/// the top left.
+#[tokio::test]
+async fn flatbed_page_matches_the_requested_region_even_if_the_driver_clips() {
+    let h = start(Default::default()).await;
+    h.backend.update(|b| {
+        b.clip_lines = Some(1146);
+        b.width_delta = -7;
+    });
+    let t = Ticket {
+        format: "image/png",
+        resolution: 100,
+        region: Some((0, 0, 2502, 4200)),
+        ..Default::default()
+    };
+    let job = h.create_job(&t.xml()).await;
+    let doc = h.get(&format!("{job}/NextDocument")).await;
+    assert_eq!(
+        decode("image/png", &doc.body),
+        (834, 1400, 3, 8),
+        "exactly the requested 8.34 x 14 in"
+    );
+
+    let mut reader = png::Decoder::new(std::io::Cursor::new(&doc.body[..]))
+        .read_info()
+        .unwrap();
+    let mut px = vec![0; reader.output_buffer_size().unwrap()];
+    reader.next_frame(&mut px).unwrap();
+    let at = |x: usize, y: usize| &px[(y * 834 + x) * 3..(y * 834 + x) * 3 + 3];
+    assert!(
+        at(10, 10) != [255, 255, 255],
+        "scanned content stays at the top left"
+    );
+    assert!(
+        at(826, 1145) != [255, 255, 255],
+        "last delivered column and line are content"
+    );
+    assert_eq!(at(827, 500), [255, 255, 255], "missing columns are white");
+    assert_eq!(at(400, 1146), [255, 255, 255], "missing lines are white");
+    assert_eq!(at(833, 1399), [255, 255, 255]);
+
+    // A driver that delivers MORE than asked (brscan4 rounds widths up) is cropped.
+    h.backend.update(|b| {
+        b.clip_lines = None;
+        b.width_delta = 8;
+    });
+    let t = Ticket {
+        format: "image/png",
+        resolution: 600,
+        region: Some((300, 300, 900, 600)),
+        ..Default::default()
+    };
+    let job = h.create_job(&t.xml()).await;
+    let doc = h.get(&format!("{job}/NextDocument")).await;
+    assert_eq!(decode("image/png", &doc.body), (1800, 1200, 3, 8));
+}
+
 #[tokio::test]
 async fn brother_gray_uses_true_gray_not_the_dithered_mode() {
     let h = start(Default::default()).await;

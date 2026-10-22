@@ -35,6 +35,10 @@ pub struct Behavior {
     pub open_fails: bool,
     /// Deliver at most one line per read, sleeping this long first (a slow scanner).
     pub read_delay: Duration,
+    /// Deliver at most this many lines (brscan4 clips the flatbed to ~291 mm).
+    pub clip_lines: Option<usize>,
+    /// Add this to the delivered width (brscan4 rounds widths up or down).
+    pub width_delta: isize,
 }
 
 #[derive(Clone, Debug)]
@@ -378,6 +382,8 @@ impl Session for FakeSession {
         let height_mm = self.number("br-y") - self.number("tl-y");
         let px = |mm: f64| ((mm / 25.4 * res).round() as usize).max(1);
         let (w, h) = (px(width_mm), px(height_mm));
+        let w = w.saturating_add_signed(behavior.width_delta).max(1);
+        let h = behavior.clip_lines.map_or(h, |c| h.min(c));
         let mode = self.string("mode");
         let (format, depth) = if mode.contains("Color") {
             (FrameFormat::Rgb, 8)

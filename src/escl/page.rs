@@ -142,12 +142,23 @@ impl ScannerService {
             progress: &active.progress,
             epoch: self.epoch,
         };
+        // Flatbed pages come out exactly the size of the requested region
+        // (see SaneRows). Feeder pages keep the paper's own length.
+        let target = (ticket.page.source == InputSource::Platen).then(|| {
+            let px = |units: u32| {
+                (f64::from(units) * f64::from(ticket.page.resolution) / scanner::UNITS_PER_INCH)
+                    .round() as usize
+            };
+            let (_, _, w, h) = ticket.page.region;
+            (px(w).max(1), px(h).max(1))
+        });
         let (result, backend_error) = {
             let mut rows = SaneRows::new(
                 session.as_mut(),
                 params,
                 ticket.page.color,
                 gamma,
+                target,
                 &active.progress,
                 self.epoch,
             );

@@ -80,13 +80,25 @@ impl io::Write for ChannelSink<'_> {
 /// Reads SANE lines and converts them to 8-bit rows in the requested mode:
 /// 1-bit data (some "gray" modes) expands to 0/255, 16-bit keeps the high
 /// byte, RGB<->gray conversion happens here, then the gamma table applies.
+///
+/// With a `target` size the page comes out exactly that many pixels:
+/// extra source pixels are dropped and missing ones are white. eSCL clients
+/// map the image onto the region they asked for, so a driver that silently
+/// clips the area (brscan4 delivers 291 mm of a 355.6 mm flatbed request,
+/// and rounds widths to its own multiples) would otherwise shift every
+/// selection Image Capture draws on its preview.
 pub struct SaneRows<'a> {
     session: &'a mut dyn Session,
     params: FrameParams,
     want: ColorMode,
     lut: [u8; 256],
     raw: Vec<u8>,
+    /// Source lines read.
     lines: usize,
+    /// Rows handed out (differs from `lines` once padding starts).
+    out_lines: usize,
+    exhausted: bool,
+    target: Option<(usize, usize)>,
     progress: &'a AtomicU64,
     epoch: Instant,
     pub error: Option<BackendError>,
@@ -98,11 +110,21 @@ impl<'a> SaneRows<'a> {
         params: FrameParams,
         want: ColorMode,
         gamma: f64,
+        target: Option<(usize, usize)>,
         progress: &'a AtomicU64,
         epoch: Instant,
     ) -> Self {
         if params.format == FrameFormat::Gray && params.depth == 1 && want == ColorMode::Gray8 {
             tracing::info!("backend delivered 1-bit data for a gray scan; expanding to 8-bit");
+        }
+        if let Some((w, h)) = target
+            && (params.pixels_per_line != w || params.lines.is_some_and(|l| l != h))
+        {
+            tracing::info!(
+                requested = ?(w, h),
+                delivered = ?(params.pixels_per_line, params.lines),
+                "backend changed the scan area; fitting the page to the requested region"
+            );
         }
         Self {
             raw: vec![0; params.bytes_per_line],
@@ -111,10 +133,41 @@ impl<'a> SaneRows<'a> {
             want,
             lut: imaging::gamma_table(gamma),
             lines: 0,
+            out_lines: 0,
+            exhausted: false,
+            target,
             progress,
             epoch,
             error: None,
         }
+    }
+
+    /// Read one source line into `raw`; false at the end of the frame.
+    fn read_line(&mut self) -> io::Result<bool> {
+        if self.exhausted || self.params.lines.is_some_and(|l| self.lines >= l) {
+            self.exhausted = true;
+            return Ok(false);
+        }
+        let mut filled = 0;
+        while filled < self.raw.len() {
+            match self.session.read(&mut self.raw[filled..]) {
+                Ok(0) => {
+                    self.exhausted = true;
+                    return Ok(false);
+                }
+                Ok(n) => {
+                    filled += n;
+                    stamp(self.progress, self.epoch);
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    self.error = Some(e);
+                    return Err(io::Error::other(msg));
+                }
+            }
+        }
+        self.lines += 1;
+        Ok(true)
     }
 
     fn sample(&self, x: usize, c: usize) -> u8 {
@@ -134,36 +187,32 @@ impl<'a> SaneRows<'a> {
 
 impl RowSource for SaneRows<'_> {
     fn width(&self) -> usize {
-        self.params.pixels_per_line
+        self.target.map_or(self.params.pixels_per_line, |(w, _)| w)
     }
     fn height(&self) -> Option<usize> {
-        self.params.lines
+        self.target.map_or(self.params.lines, |(_, h)| Some(h))
     }
     fn channels(&self) -> usize {
         self.want.channels()
     }
 
     fn next_row(&mut self, row: &mut [u8]) -> io::Result<bool> {
-        if self.params.lines.is_some_and(|l| self.lines >= l) {
+        if self.height().is_some_and(|h| self.out_lines >= h) {
             return Ok(false);
         }
-        let mut filled = 0;
-        while filled < self.raw.len() {
-            match self.session.read(&mut self.raw[filled..]) {
-                Ok(0) => return Ok(false),
-                Ok(n) => {
-                    filled += n;
-                    stamp(self.progress, self.epoch);
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    self.error = Some(e);
-                    return Err(io::Error::other(msg));
-                }
+        if !self.read_line()? {
+            if self.target.is_none() {
+                return Ok(false);
             }
+            // The driver delivered fewer lines than the region: white.
+            row.fill(255);
+            self.out_lines += 1;
+            return Ok(true);
         }
+        let channels = self.want.channels();
+        let copy = self.params.pixels_per_line.min(self.width());
         let rgb_in = self.params.format == FrameFormat::Rgb;
-        for x in 0..self.params.pixels_per_line {
+        for x in 0..copy {
             match (self.want, rgb_in) {
                 (ColorMode::Gray8, false) => row[x] = self.lut[usize::from(self.sample(x, 0))],
                 (ColorMode::Gray8, true) => {
@@ -186,7 +235,8 @@ impl RowSource for SaneRows<'_> {
                 }
             }
         }
-        self.lines += 1;
+        row[copy * channels..].fill(255);
+        self.out_lines += 1;
         Ok(true)
     }
 }
