@@ -21,6 +21,11 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// Nothing on the LAN has resolved.
+    pub fn is_empty(&self) -> bool {
+        self.hosts.is_empty()
+    }
+
     /// Returns true if anything changed.
     pub fn apply(&mut self, event: &MdnsEvent) -> bool {
         match event {
@@ -86,7 +91,7 @@ pub struct PrinterTarget {
     pub device_id: String,
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     pub brother: Vec<BrotherTarget>,
     pub printers: Vec<PrinterTarget>,

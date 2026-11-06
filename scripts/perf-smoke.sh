@@ -1,7 +1,8 @@
 #!/bin/sh
 # Resource baselines of the release binary, measured in an isolated network
 # namespace (a dummy "LAN" interface, no real network):
-#   - startup to first mDNS announcement < 2 s (fake backend: no SANE probe)
+#   - startup to first mDNS announcement < 250 ms (fake backend: no SANE probe;
+#     the first reconcile pass skips the debounce)
 #   - idle RSS < 20 MiB
 #   - idle CPU ~0: at most 5 clock ticks (50 ms) over 10 s
 #
@@ -35,7 +36,7 @@ kill "$pid"; wait "$pid" || true
 idle_ticks=$((c1 - c0))
 echo "startup_to_announced_ms=$startup_ms idle_rss_kib=$rss_kb idle_cpu_ticks_10s=$idle_ticks"
 fail=0
-[ "$startup_ms" -lt 2000 ] || { echo "FAIL: startup ${startup_ms} ms >= 2000"; fail=1; }
+[ "$startup_ms" -lt 250 ] || { echo "FAIL: startup ${startup_ms} ms >= 250"; fail=1; }
 [ "$rss_kb" -lt 20480 ] || { echo "FAIL: idle RSS ${rss_kb} KiB >= 20 MiB"; fail=1; }
 [ "$idle_ticks" -le 5 ] || { echo "FAIL: idle CPU ${idle_ticks} ticks in 10 s"; fail=1; }
 exit $fail

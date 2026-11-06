@@ -11,8 +11,9 @@ use airbridge::backend::fake::FakeDevice;
 use airbridge::discovery::PrinterTarget;
 use airbridge::discovery::cups::{QueueInfo, SpoolError, Spooler};
 use airbridge::mdns::fake::FakeNet;
-use common::lan::{FakeBrscan, announce_dell, brother4_and_wsd, spec};
-use common::{Opts, start, wait_until};
+use airbridge::net::addrs::IfAddr;
+use common::lan::{DELL_HOST, FakeBrscan, announce_dell, brother4_and_wsd, spec};
+use common::{LAN_IP, Opts, docker, lan, start, wait_until};
 use hyper::StatusCode;
 use parking_lot::Mutex;
 
@@ -46,6 +47,56 @@ async fn dell_is_bridged_once_via_brother4_with_rebadge_mapping() {
     let (name, host, _) = &h.net.published("_uscan._tcp")[0];
     assert_eq!(name, "Dell MFP E514dw._uscan._tcp.local.");
     assert_eq!(host, "airbridge-testhost.local.");
+}
+
+#[tokio::test]
+async fn printer_behind_a_second_nic_is_bridged_but_never_served_there() {
+    // Multi-homed host: default route on lan0, the printer's network on lan1.
+    let nic2 = Ipv4Addr::new(127, 0, 5, 1);
+    let net = FakeNet::new();
+    net.attach(DELL_HOST, "lan1");
+    announce_dell(&net, Ipv4Addr::new(127, 0, 5, 20));
+    let brscan = FakeBrscan::new("second-nic");
+    let h = start(Opts {
+        net,
+        devices: brother4_and_wsd(),
+        brscan: Some(brscan.registrar()),
+        addrs: vec![
+            lan(LAN_IP),
+            IfAddr {
+                iface: "lan1".into(),
+                ip: IpAddr::V4(nic2),
+                prefix: 24,
+                index: 4,
+            },
+            docker(),
+        ],
+        ..Default::default()
+    })
+    .await;
+    wait_until(Duration::from_secs(2), || {
+        brscan
+            .entries()
+            .iter()
+            .any(|e| e.ends_with("IP-ADDRESS=127.0.5.20 "))
+    })
+    .await;
+    let announced: Vec<IpAddr> = h
+        .net
+        .published("_uscan._tcp")
+        .into_iter()
+        .flat_map(|(_, _, a)| a)
+        .collect();
+    assert_eq!(
+        announced,
+        vec![IpAddr::V4(LAN_IP)],
+        "announced on lan0 only"
+    );
+    assert!(
+        h.app.bound().iter().all(|a| a.ip() != IpAddr::V4(nic2)),
+        "never served on the printer's network: {:?}",
+        h.app.bound()
+    );
 }
 
 #[tokio::test]

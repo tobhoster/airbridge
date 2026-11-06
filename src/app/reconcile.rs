@@ -55,11 +55,32 @@ impl Shared {
                 brscan.as_ref().is_some_and(|b| b.supported(m))
             })
         };
+        self.log_plan(&plan);
         let mut retry = self.register_brother(&plan);
         retry |= self.sync_scanners(&plan);
         let printers = self.sync_printers(&plan);
         self.update_status_page(&plan, &printers);
         retry
+    }
+
+    /// One line per discovery decision that is new since the last pass, so
+    /// the log says what was found and why a device is not bridged.
+    fn log_plan(&self, plan: &Plan) {
+        let mut last = self.last_plan.lock();
+        for t in plan.brother.iter().filter(|t| !last.brother.contains(t)) {
+            tracing::info!(host = %t.name, name = %t.display, model = %t.model, ip = %t.ip, "discovery: Brother scanner, bridging via brscan4");
+        }
+        for p in plan.printers.iter().filter(|p| !last.printers.contains(p)) {
+            if self.deps.spooler.is_some() {
+                tracing::info!(name = %p.display, queue = %p.queue, uri = %p.uri, "discovery: printer, bridging as AirPrint");
+            } else {
+                tracing::info!(name = %p.display, uri = %p.uri, "discovery: printer not bridged, printing is off");
+            }
+        }
+        for (host, reason) in plan.skipped.iter().filter(|s| !last.skipped.contains(s)) {
+            tracing::info!(%host, %reason, "discovery: not bridged");
+        }
+        *last = plan.clone();
     }
 
     fn register_brother(&self, plan: &Plan) -> bool {
@@ -79,6 +100,7 @@ impl Shared {
             }
             match brscan.register(&t.name, &t.model, t.ip) {
                 Ok(()) => {
+                    tracing::info!(name = %t.name, model = %t.model, ip = %t.ip, "registered with brscan4");
                     registered.insert(t.name.clone(), want);
                     *self.sane_dirty.lock() = true;
                     // brother4 reads its device list only in sane_init.
@@ -135,6 +157,7 @@ impl Shared {
             *self.sane_reinit.lock() = true;
         }
         let devices = backend.devices()?;
+        tracing::debug!(devices = ?devices.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), "SANE: devices found");
         let brother: Vec<BrotherTarget> = self
             .registered
             .lock()

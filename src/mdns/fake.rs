@@ -2,7 +2,8 @@
 //! devices (a printer that already speaks AirPrint, a rival announcing our
 //! name) are injected with `FakeNet::announce`. It mirrors the behaviour of
 //! the real responder that airbridge relies on: browse results include our own
-//! services, and a name clash is resolved by renaming to `Name (2)`.
+//! services, a name clash is resolved by renaming to `Name (2)`, and a device
+//! `attach`ed behind one interface is heard only when browsing on it.
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -27,6 +28,19 @@ struct NetState {
     regs: BTreeMap<String, Reg>,
     browsers: Vec<(u64, String, mpsc::UnboundedSender<MdnsEvent>)>,
     next_owner: u64,
+    /// host -> the only interface it is reachable on; absent = everywhere.
+    attached: BTreeMap<String, String>,
+    /// owner -> interfaces it browses on; absent = all.
+    ifaces: BTreeMap<u64, Vec<String>>,
+}
+
+impl NetState {
+    fn hears(&self, owner: u64, reg: &Reg) -> bool {
+        match (self.attached.get(&reg.host), self.ifaces.get(&owner)) {
+            (Some(iface), Some(browsing)) => browsing.contains(iface),
+            _ => true,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -70,6 +84,15 @@ impl FakeNet {
         })
     }
 
+    /// `host` is reachable only through the interface `iface` (a printer on a
+    /// second NIC's network).
+    pub fn attach(&self, host: &str, iface: &str) {
+        self.state
+            .lock()
+            .attached
+            .insert(host.to_owned(), iface.to_owned());
+    }
+
     /// A foreign device announces a service. Returns the full name.
     pub fn announce(&self, host: &str, spec: ServiceSpec, addrs: Vec<IpAddr>) -> String {
         self.register(0, host, &spec, &addrs).0
@@ -78,8 +101,8 @@ impl FakeNet {
     pub fn remove(&self, fullname: &str) {
         let mut s = self.state.lock();
         if let Some(reg) = s.regs.remove(fullname) {
-            for (_, ty, tx) in &s.browsers {
-                if *ty == reg.spec.ty {
+            for (owner, ty, tx) in &s.browsers {
+                if *ty == reg.spec.ty && s.hears(*owner, &reg) {
                     // A browser whose host is gone no longer cares.
                     let _ = tx.send(MdnsEvent::Removed {
                         ty: ty.clone(),
@@ -134,8 +157,8 @@ impl FakeNet {
             host: host.to_owned(),
             addrs: addrs.to_vec(),
         };
-        for (_, ty, tx) in &s.browsers {
-            if *ty == reg.spec.ty {
+        for (browser, ty, tx) in &s.browsers {
+            if *ty == reg.spec.ty && s.hears(*browser, &reg) {
                 // A browser whose host is gone no longer cares.
                 let _ = tx.send(MdnsEvent::Resolved(resolved(&name, &reg)));
             }
@@ -198,7 +221,7 @@ impl Mdns for FakeMdns {
     fn browse(&self, ty: &str) -> Result<(), MdnsError> {
         let mut s = self.net.state.lock();
         for (name, reg) in &s.regs {
-            if reg.spec.ty == ty {
+            if reg.spec.ty == ty && s.hears(self.owner, reg) {
                 // Receiver lives as long as this host; ignore a closed one.
                 let _ = self.tx.send(MdnsEvent::Resolved(resolved(name, reg)));
             }
@@ -212,7 +235,26 @@ impl Mdns for FakeMdns {
         self.rx.lock().take()
     }
 
-    fn set_interfaces(&self, _ifaces: &[String]) {}
+    /// Like the real responder: an empty list leaves the selection alone;
+    /// devices on a newly enabled interface are heard right away.
+    fn set_interfaces(&self, ifaces: &[String]) {
+        if ifaces.is_empty() {
+            return;
+        }
+        let mut s = self.net.state.lock();
+        s.ifaces.insert(self.owner, ifaces.to_vec());
+        let types: Vec<&str> = s
+            .browsers
+            .iter()
+            .filter(|(owner, _, _)| *owner == self.owner)
+            .map(|(_, ty, _)| ty.as_str())
+            .collect();
+        for (name, reg) in &s.regs {
+            if types.contains(&reg.spec.ty.as_str()) && s.hears(self.owner, reg) {
+                let _ = self.tx.send(MdnsEvent::Resolved(resolved(name, reg)));
+            }
+        }
+    }
 
     fn alive(&self) -> bool {
         *self.alive.lock()

@@ -165,6 +165,7 @@ impl Mdns for RealMdns {
             }
         }
         *current = ifaces.to_vec();
+        tracing::info!(interfaces = ?ifaces, "mDNS: browsing on these interfaces");
     }
 
     fn alive(&self) -> bool {

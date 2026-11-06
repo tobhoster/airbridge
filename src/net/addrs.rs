@@ -55,7 +55,8 @@ pub fn is_virtual(iface: &str) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selection {
-    /// Interfaces holding a default route; if none, every non-virtual one.
+    /// Serve and announce on interfaces holding a default route (if none,
+    /// every non-virtual one); browse on every non-virtual interface.
     Auto,
     Named(Vec<String>),
 }
@@ -102,6 +103,24 @@ pub fn select(all: &[IfAddr], default_ifaces: &[String], sel: &Selection) -> Vec
         .filter(|a| !floating(a))
         .cloned()
         .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Interfaces to browse mDNS on. `Auto` listens on every non-virtual
+/// interface with a routable address, so a printer behind a second NIC is
+/// found even though airbridge serves and announces only on `select()`'s
+/// addresses (mdns-sd announces an address only on the interface it belongs to).
+pub fn browse_ifaces(all: &[IfAddr], sel: &Selection) -> Vec<String> {
+    let mut out: Vec<String> = match sel {
+        Selection::Named(names) => names.clone(),
+        Selection::Auto => all
+            .iter()
+            .filter(|a| !is_virtual(&a.iface) && !is_link_local(a.ip))
+            .map(|a| a.iface.clone())
+            .collect(),
+    };
     out.sort();
     out.dedup();
     out

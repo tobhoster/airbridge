@@ -16,9 +16,9 @@ use tokio::task::JoinHandle;
 
 use crate::backend::Backend;
 use crate::config::Config;
-use crate::discovery::Registry;
 use crate::discovery::brscan::Brscan;
 use crate::discovery::cups::Spooler;
+use crate::discovery::{Plan, Registry};
 use crate::escl::http::{self, HttpState};
 use crate::escl::jobs::ScannerService;
 use crate::health::Health;
@@ -27,6 +27,9 @@ use crate::mdns::{BROWSE_TYPES, Mdns, MdnsEvent};
 use crate::net::access::AccessPolicy;
 use crate::net::addrs::{self, AddrSource};
 use crate::net::listen::Listeners;
+
+/// How long after startup an empty LAN earns a warning.
+const NOTHING_FOUND_AFTER: Duration = Duration::from_secs(30);
 
 pub struct Deps {
     pub backend: Arc<dyn Backend>,
@@ -54,6 +57,10 @@ struct Shared {
     announcer: Announcer,
     health: Arc<Health>,
     registry: Mutex<Registry>,
+    /// The previous reconcile's plan; only changes to it are logged.
+    last_plan: Mutex<Plan>,
+    /// Interfaces mDNS currently browses on (for the nothing-found warning).
+    browsing: Mutex<Vec<String>>,
     registered: Mutex<BTreeMap<String, Registration>>,
     sane_dirty: Mutex<bool>,
     /// A backend's configuration changed (brsaneconfig4): the next probe
@@ -106,6 +113,8 @@ impl App {
             announcer,
             health,
             registry: Mutex::new(Registry::default()),
+            last_plan: Mutex::new(Plan::default()),
+            browsing: Mutex::new(Vec::new()),
             registered: Mutex::new(BTreeMap::new()),
             sane_dirty: Mutex::new(true),
             sane_reinit: Mutex::new(false),
@@ -127,6 +136,7 @@ impl App {
             tokio::spawn(Arc::clone(&shared).net_loop(bind_failed)),
             tokio::spawn(Arc::clone(&shared).reconcile_loop()),
             tokio::spawn(Arc::clone(&shared).housekeeping_loop()),
+            tokio::spawn(Arc::clone(&shared).warn_if_nothing_found()),
         ];
         if let Some(rx) = events {
             tasks.push(tokio::spawn(Arc::clone(&shared).event_loop(rx)));
@@ -209,9 +219,9 @@ impl Shared {
         let bound = self.listeners.bound();
         self.health
             .set("http", !bound.is_empty(), "no listening socket");
-        let mut ifaces: Vec<String> = selected.iter().map(|a| a.iface.clone()).collect();
-        ifaces.dedup();
-        self.deps.mdns.set_interfaces(&ifaces);
+        let browse = addrs::browse_ifaces(&all, &self.cfg.interfaces);
+        self.deps.mdns.set_interfaces(&browse);
+        *self.browsing.lock() = browse;
         self.announcer.set_addrs(announce);
         !failed.is_empty()
     }
@@ -249,6 +259,19 @@ impl Shared {
             }
             let changed = self.registry.lock().apply(&event);
             if changed {
+                match &event {
+                    MdnsEvent::Resolved(r) => tracing::debug!(
+                        host = %r.host,
+                        service = %r.fullname,
+                        addrs = ?r.addrs,
+                        txt = ?r.txt,
+                        "mDNS: service seen"
+                    ),
+                    MdnsEvent::Removed { fullname, .. } => {
+                        tracing::debug!(service = %fullname, "mDNS: service gone")
+                    }
+                    MdnsEvent::NameChanged { .. } => {}
+                }
                 self.kick.notify_one();
             }
         }
@@ -257,6 +280,10 @@ impl Shared {
 
     async fn reconcile_loop(self: Arc<Self>) {
         let mut wait = self.cfg.rescan;
+        // The first pass runs at once: there is nothing to batch yet, and the
+        // local scanners get announced without waiting. Browse results that
+        // arrive meanwhile get their own debounced pass.
+        let mut first = true;
         loop {
             tokio::select! {
                 () = self.kick.notified() => {}
@@ -264,7 +291,9 @@ impl Shared {
                     *self.sane_dirty.lock() = true;
                 }
             }
-            tokio::time::sleep(self.debounce).await;
+            if !std::mem::take(&mut first) {
+                tokio::time::sleep(self.debounce).await;
+            }
             let me = Arc::clone(&self);
             wait = match tokio::task::spawn_blocking(move || me.reconcile()).await {
                 Ok(true) => Duration::from_secs(5),
@@ -286,6 +315,29 @@ impl Shared {
             for s in scanners {
                 s.purge();
             }
+        }
+    }
+
+    /// A silent log is the worst outcome when the LAN is not reachable
+    /// (wrong interface, no host networking): say so once.
+    async fn warn_if_nothing_found(self: Arc<Self>) {
+        tokio::time::sleep(NOTHING_FOUND_AFTER).await;
+        if !self.registry.lock().is_empty() {
+            return;
+        }
+        let interfaces = self.browsing.lock().clone();
+        let after_s = NOTHING_FOUND_AFTER.as_secs();
+        if interfaces.is_empty() {
+            tracing::warn!(
+                after_s,
+                "mDNS: no printers or scanners found and no LAN interface; in a container, use host networking (README: Troubleshooting)"
+            );
+        } else {
+            tracing::warn!(
+                ?interfaces,
+                after_s,
+                "mDNS: no printers or scanners found on these interfaces; if a device is on another one, set AIRBRIDGE_INTERFACES (README: Troubleshooting)"
+            );
         }
     }
 }

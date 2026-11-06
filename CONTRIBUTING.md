@@ -18,5 +18,5 @@ Baselines measured on an Intel Core i7-12700T:
 |---|---|---|
 | JPEG, 600 dpi US Letter RGB | 116 ms | 128–131 ms (`scripts/airsane-jpeg-baseline.sh`) |
 | ScannerCapabilities p99 | 0.12–0.28 ms | — |
-| Startup to first announcement | 325 ms | — |
+| Startup to first announcement | ~25 ms | — |
 | Idle RSS / CPU | 6.3 MiB / ~0 | — |

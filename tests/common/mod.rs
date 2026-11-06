@@ -72,6 +72,8 @@ pub struct Opts {
     pub port: u16,
     pub tweak: Box<dyn FnOnce(&mut Config)>,
     pub wait_for_scanners: usize,
+    /// Interface addresses; the default route is always on `lan0`.
+    pub addrs: Vec<IfAddr>,
 }
 
 impl Default for Opts {
@@ -84,6 +86,7 @@ impl Default for Opts {
             port: free_port(),
             tweak: Box::new(|_| {}),
             wait_for_scanners: 1,
+            addrs: vec![lan(LAN_IP), docker()],
         }
     }
 }
@@ -103,7 +106,7 @@ pub fn test_config(port: u16) -> Config {
 pub async fn start(opts: Opts) -> Harness {
     let backend = FakeBackend::new(opts.devices);
     let mdns = opts.net.host("airbridge-testhost");
-    let addrs = FakeAddrs::new(vec![lan(LAN_IP), docker()], vec!["lan0".into()]);
+    let addrs = FakeAddrs::new(opts.addrs, vec!["lan0".into()]);
     let mut cfg = test_config(opts.port);
     (opts.tweak)(&mut cfg);
     let deps = Deps {
