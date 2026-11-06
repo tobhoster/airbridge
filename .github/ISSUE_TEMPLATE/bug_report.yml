@@ -1,0 +1,57 @@
+name: Something isn't found or doesn't work
+description: A scanner or printer isn't bridged, or bridging misbehaves. Questions are welcome too.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying airbridge. Questions like "should this work with my device?" are welcome here.
+        The README's Troubleshooting section covers the most common causes. The outputs below usually show what's wrong.
+  - type: input
+    id: device
+    attributes:
+      label: Printer / scanner model
+      placeholder: Brother MFC-9340CDW
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: run
+    attributes:
+      label: How you run airbridge
+      description: Commit (`git rev-parse --short HEAD`), and your compose file or `docker run` command, or Homebrew / Kubernetes.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: airbridge log
+      description: Restart with `RUST_LOG=info,airbridge=debug`, wait a minute, then paste the log (`docker compose logs airbridge`).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Status page
+      description: The contents of `http://<host>:8090/`, especially the devices airbridge didn't bridge and why.
+      render: text
+  - type: textarea
+    id: avahi
+    attributes:
+      label: mDNS from the host
+      description: Output of `avahi-browse -rt _scanner._tcp` and `avahi-browse -rt _ipp._tcp` on the machine running airbridge.
+      render: text
+  - type: textarea
+    id: network
+    attributes:
+      label: Network
+      description: Output of `ip -br addr` and `ip route` on the machine running airbridge, and the IP of the device.
+      render: text
+    validations:
+      required: true
