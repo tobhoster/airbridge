@@ -71,13 +71,7 @@ jobs:
       - name: Build (verifies the brscan4 SHA-256)
         run: docker build -t airbridge:ci .
       - name: Image size budget (bytes of the root filesystem)
-        run: |
-          # `docker image inspect .Size` differs between storage drivers
-          # (compressed vs unpacked); the unpacked root filesystem does not.
-          size=$(docker run --rm --entrypoint du airbridge:ci -sxb / | cut -f1)
-          budget=$(cat container-size-budget)
-          echo "root filesystem ${size} bytes, budget ${budget}"
-          test "$size" -le "$budget"
+        run: scripts/size-budget.sh airbridge:ci
       - name: Smoke test with the fake backend
         run: |
           docker run -d --name ab -p 18090:8090 -e AIRBRIDGE_BACKEND=fake -e AIRBRIDGE_ALLOW=0.0.0.0/0 airbridge:ci

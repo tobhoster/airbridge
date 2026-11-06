@@ -54,11 +54,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
       - name: Image size budget (bytes of the root filesystem)
-        run: |
-          size=$(docker run --rm --entrypoint du airbridge:test -sxb / | cut -f1)
-          budget=$(cat container-size-budget)
-          echo "root filesystem ${size} bytes, budget ${budget}"
-          test "$size" -le "$budget"
+        run: scripts/size-budget.sh airbridge:test
       - name: Entrypoint and runtime brscan4 edge cases
         run: scripts/test-image.sh airbridge:test
       - name: Log in to GHCR
