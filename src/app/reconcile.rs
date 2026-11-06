@@ -100,7 +100,6 @@ impl Shared {
             }
             match brscan.register(&t.name, &t.model, t.ip) {
                 Ok(()) => {
-                    tracing::info!(name = %t.name, model = %t.model, ip = %t.ip, "registered with brscan4");
                     registered.insert(t.name.clone(), want);
                     *self.sane_dirty.lock() = true;
                     // brother4 reads its device list only in sane_init.
