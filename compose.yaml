@@ -1,16 +1,24 @@
 # docker compose up -d
 #
-# Builds the image locally (brscan4 is downloaded from Brother during the
-# build; no prebuilt image is published) and runs it on the host network,
-# which mDNS needs. Linux hosts only: Docker Desktop on macOS/Windows has no
-# real host networking.
+# Runs the published image on the host network, which mDNS needs. Linux
+# hosts only: Docker Desktop on macOS/Windows has no real host networking.
+#
+# The image holds no Brother code. On amd64, the first start downloads
+# Brother's brscan4 driver from Brother, checks its SHA-256 and keeps it in
+# the `airbridge-data` volume. To build the image yourself instead, see the
+# README ("Build it yourself").
 services:
   airbridge:
-    build: .
-    image: airbridge:local
+    image: ghcr.io/tobhoster/airbridge:latest
     network_mode: host
     restart: unless-stopped
+    volumes:
+      - airbridge-data:/var/lib/airbridge
     # Optional settings, see README "Configuration":
     # environment:
     #   AIRBRIDGE_NO_PRINT: "MYPRINTER"
     #   AIRBRIDGE_LOCATION: "Office"
+    #   AIRBRIDGE_BRSCAN4: "off"
+
+volumes:
+  airbridge-data:

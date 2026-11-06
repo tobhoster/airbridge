@@ -209,6 +209,8 @@ impl Config {
                     c.jobs.color_gamma = g;
                 }
                 "AIRBRIDGE_BRSCAN4_DIR" => c.brscan_root = PathBuf::from(v.trim()),
+                // Read by the container entrypoint (docker/entrypoint.sh).
+                "AIRBRIDGE_BRSCAN4" => {}
                 k if k.starts_with("AIRBRIDGE_") => {
                     tracing::warn!(var = k, "unknown setting ignored")
                 }

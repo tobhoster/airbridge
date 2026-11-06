@@ -5,12 +5,14 @@ cargo test                       # hermetic suite, a few seconds
 AIRBRIDGE_ALLOW_NETWORK=1 cargo test --test hardware -- --ignored hardware   # real LAN and scanner
 cargo bench --bench perf         # criterion baselines
 scripts/perf-smoke.sh            # startup, idle RSS, idle CPU of the release binary
+docker build --build-arg BRSCAN4=runtime -t airbridge:runtime . && scripts/test-image.sh airbridge:runtime   # published-image entrypoint edge cases
 cd fuzz && cargo +nightly fuzz run scan_settings corpus/scan_settings seeds/scan_settings
 ```
 
 - **Tests never touch the network.** `.cargo/config.toml` runs every test binary through `scripts/netns-runner.sh`, inside an empty network namespace. Set `AIRBRIDGE_ALLOW_NETWORK=1` for `cargo run` and the hardware suite.
 - **Building needs `nasm`** for libjpeg-turbo's SIMD code.
 - **CI** fails if the suite takes over 15 s, if a benchmark regresses more than 20% against the base commit, or if the image exceeds `container-size-budget`. It also fuzzes ScanSettings for 60 s.
+- **Published image.** `.github/workflows/image.yml` builds the `BRSCAN4=runtime` image natively on amd64 and arm64, runs `scripts/test-image.sh` on each, and on `main` (`:latest`, `:sha-…`) or a `v*` tag (`:1.2.3`, `:1.2`) pushes both and merges them into one multi-arch tag on `ghcr.io`. Pull requests only build and test.
 
 Baselines measured on an Intel Core i7-12700T:
 

@@ -25,7 +25,7 @@ spec:
       containers:
         - name: airbridge
           image: airbridge
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: escl
               containerPort: 8090
@@ -34,6 +34,17 @@ spec:
           env:
             - name: RUST_LOG
               value: info,mdns_sd=warn
+          volumeMounts:
+            # brscan4, downloaded from Brother on first start of the pod.
+            - name: data
+              mountPath: /var/lib/airbridge
+          # The first start may download brscan4 before serving.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            periodSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /healthz
@@ -61,3 +72,6 @@ spec:
             capabilities:
               drop: [ALL]
               add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, NET_BIND_SERVICE, KILL]
+      volumes:
+        - name: data
+          emptyDir: {}

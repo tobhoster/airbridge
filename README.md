@@ -6,18 +6,20 @@ Run it on any Linux machine on the same network. It finds the devices itself, br
 
 ## Install
 
-### Supported: Docker Compose on x86_64 Linux
+### Supported: Docker Compose on Linux
 
-This is the one fully supported setup. You need a Linux machine on the same network as the devices, with Docker installed.
+This is the one fully supported setup. You need a Linux machine on the same network as the devices, with Docker installed. Nothing to clone or build:
 
 ```sh
-git clone https://github.com/tobhoster/airbridge && cd airbridge
+mkdir airbridge && cd airbridge
+curl -fsSLO https://raw.githubusercontent.com/tobhoster/airbridge/main/compose.yaml
 docker compose up -d
 ```
 
 What this does for you:
 
-- **Builds the image locally.** Brother scanners only work through Brother's brscan4 driver, which is proprietary and x86-only. The build downloads it from Brother and checks its SHA-256. It also installs `netbase`, `sane-airscan` and CUPS. No prebuilt image is published, because brscan4 can't be redistributed.
+- **Runs the published image** `ghcr.io/tobhoster/airbridge` (amd64 and arm64). It includes `netbase`, `sane-airscan` and CUPS.
+- **Fetches Brother's driver on first start.** Brother scanners only work through brscan4, which is proprietary and x86-only, so the image doesn't contain it. On amd64, the first start downloads it from Brother, checks its SHA-256 and keeps it in the `airbridge-data` volume; later starts don't download again. If the download fails, airbridge starts without it and tries again on the next start. `AIRBRIDGE_BRSCAN4=off` skips it.
 - **Uses host networking** (`network_mode: host`). mDNS doesn't work without it.
 
 Check it is running:
@@ -32,24 +34,25 @@ Then open Image Capture (or Preview → Import from Scanner) on a Mac: the scann
 **Without Compose**, the same image runs with `docker run`:
 
 ```sh
-git clone https://github.com/tobhoster/airbridge && cd airbridge
-docker build -t airbridge:local .
 docker run -d --name airbridge --network host --restart unless-stopped \
+  -v airbridge-data:/var/lib/airbridge \
   -e AIRBRIDGE_INTERFACES=eth0,eth1 \
-  airbridge:local
+  ghcr.io/tobhoster/airbridge:latest
 ```
 
 `AIRBRIDGE_INTERFACES` is optional. The example is for a host with two network interfaces; leave the line out to use `auto`.
 
-### Best effort
-
-**Raspberry Pi / ARM.** The same Compose setup, but **without brscan4**: Brother only ships it for x86. Brother scanners are then reached only through WSD, and only if the device supports WSD scanning (the Dell MFP E514dw does; many older Brothers don't). Printing works the same as on x86. Use a Pi 4 or 5 with 64-bit Raspberry Pi OS. The first `docker compose up` compiles airbridge on the Pi, which takes a while.
+**Build it yourself** if you'd rather not pull an image. `BRSCAN4=1` (the default for local builds) downloads brscan4 from Brother during the build, checks its SHA-256 and puts it in the image:
 
 ```sh
-curl -fsSL https://get.docker.com | sh
 git clone https://github.com/tobhoster/airbridge && cd airbridge
-sudo docker compose up -d
+docker build -t airbridge:local .
+docker run -d --name airbridge --network host --restart unless-stopped airbridge:local
 ```
+
+### Best effort
+
+**Raspberry Pi / ARM.** The same Compose setup (the image is multi-arch), but **without brscan4**: Brother only ships it for x86. Brother scanners are then reached only through WSD, and only if the device supports WSD scanning (the Dell MFP E514dw does; many older Brothers don't). Printing works the same as on x86. Use a Pi 4 or 5 with 64-bit Raspberry Pi OS.
 
 **Homebrew on Linux (advanced).** Convenient, but you install SANE, `sane-airscan`, brscan4 and CUPS yourself, so problems are harder to diagnose.
 
@@ -58,7 +61,7 @@ brew install tobhoster/airbridge/airbridge
 brew services start airbridge
 ```
 
-**Kubernetes (community, advanced).** Build and push the image, set it in `deploy/kubernetes/kustomization.yaml`, then `kubectl apply -k deploy/kubernetes`. The manifests use `hostNetwork: true`; don't remove it.
+**Kubernetes (community, advanced).** `kubectl apply -k deploy/kubernetes` runs the published image. The manifests use `hostNetwork: true`; don't remove it.
 
 ### Not supported
 
@@ -79,9 +82,10 @@ Nothing is required. Optional environment variables:
 | `AIRBRIDGE_PRINTING` | `auto` | `off` for scanning only |
 | `AIRBRIDGE_PORT` | `8090` | HTTP port |
 | `AIRBRIDGE_BACKEND` | `sane` | `fake` serves a demo scanner |
+| `AIRBRIDGE_BRSCAN4` | `auto` | Published image only: `off` skips downloading Brother's brscan4 |
 | `RUST_LOG` | `info` | `info,airbridge=debug` logs every mDNS service seen; add `mdns_sd=debug` to trace the mDNS library |
 
-Build arguments: `BRSCAN4=0` skips Brother's driver; `PRINTING=0` skips CUPS; `PRINTER_DRIVERS` picks the driver packages.
+Build arguments: `BRSCAN4=1` puts brscan4 in the image, `runtime` downloads it on first start (the published image), `0` leaves it out; `PRINTING=0` skips CUPS; `PRINTER_DRIVERS` picks the driver packages.
 
 ## Pitfalls
 
@@ -103,6 +107,6 @@ Still stuck? [Open an issue](https://github.com/tobhoster/airbridge/issues/new/c
 
 ## Licence
 
-MIT or Apache-2.0. Brother's brscan4 is proprietary and is not part of this repository: the Docker build downloads it from Brother and checks its SHA-256. No prebuilt image is published.
+MIT or Apache-2.0. Brother's brscan4 is proprietary and is not part of this repository or of the published image: the image downloads it from Brother on first start (a local build downloads it during the build), and both check its SHA-256.
 
 Development notes (tests, benchmarks, fuzzing) are in [CONTRIBUTING.md](CONTRIBUTING.md).
