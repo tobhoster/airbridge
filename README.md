@@ -82,6 +82,7 @@ Nothing is required. Optional environment variables:
 | `AIRBRIDGE_PRINTING` | `auto` | `off` for scanning only |
 | `AIRBRIDGE_PORT` | `8090` | HTTP port |
 | `AIRBRIDGE_BACKEND` | `sane` | `fake` serves a demo scanner |
+| `AIRBRIDGE_GAMMA` | `1.0` | Gamma applied to scans (0.1–10). Below 1 brightens, above 1 darkens; 1.0 passes the scanner's levels through |
 | `AIRBRIDGE_BRSCAN4` | `auto` | Published image only: `off` skips downloading Brother's brscan4 |
 | `RUST_LOG` | `info` | `info,airbridge=debug` logs every mDNS service seen; add `mdns_sd=debug` to trace the mDNS library |
 

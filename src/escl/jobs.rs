@@ -42,9 +42,10 @@ impl Default for JobConfig {
             wedge_grace: Duration::from_secs(30),
             pending_timeout: Duration::from_secs(60),
             retention: Duration::from_secs(300),
-            // AirSane's shipped default: compensates macOS' 1.8 display gamma.
-            gray_gamma: 0.555_555,
-            color_gamma: 0.555_555,
+            // brscan4 delivers display-encoded levels; AirSane's suggested
+            // 0.555 (meant for linear backends) washed scans out.
+            gray_gamma: 1.0,
+            color_gamma: 1.0,
         }
     }
 }
